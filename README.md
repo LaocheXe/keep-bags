@@ -146,7 +146,7 @@ local function openMenu(allowedMenus)
 end
 ```
 
-## Only if you're using qb-inventory
+## Only if you're using qb-inventory-legacy (version 1.2.4)
 Find the `SaveStashItems()` function in `server/main.lua` and then add this event at the end of it 
 
 ```lua
@@ -174,6 +174,47 @@ local function SaveStashItems(stashId, items)
 end
 ```
 
+## Only if you're using qb-inventory (version 2.0.0+)
+Find the `qb-inventory:server:closeInventory` Register Net Event in `server/main.lua` and then add this event at the end of it
+
+
+```lua
+TriggerEvent('keep-harmony:stash->close', stashId)
+```
+
+after editing the Register Net Event. The modified function should look like this:
+
+
+```lua
+RegisterNetEvent('qb-inventory:server:closeInventory', function(inventory)
+    local src = source
+    local QBPlayer = QBCore.Functions.GetPlayer(src)
+    if not QBPlayer then return end
+    Player(source).state.inv_busy = false
+    if inventory:find('shop%-') then return end
+    if inventory:find('otherplayer%-') then
+        local targetId = tonumber(inventory:match('otherplayer%-(.+)'))
+        Player(targetId).state.inv_busy = false
+        return
+    end
+    if Drops[inventory] then
+        Drops[inventory].isOpen = false
+        if #Drops[inventory].items == 0 and not Drops[inventory].isOpen then -- if no listeed items in the drop on close
+            TriggerClientEvent('qb-inventory:client:removeDropTarget', -1, Drops[inventory].entityId)
+            Wait(500)
+            local entity = NetworkGetEntityFromNetworkId(Drops[inventory].entityId)
+            if DoesEntityExist(entity) then DeleteEntity(entity) end
+            Drops[inventory] = nil
+        end
+        return
+    end
+    if not Inventories[inventory] then return end
+    Inventories[inventory].isOpen = false
+    TriggerEvent('keep-harmony:stash->close', stashId)
+    MySQL.prepare('INSERT INTO inventories (identifier, items) VALUES (?, ?) ON DUPLICATE KEY UPDATE items = ?', { inventory, json.encode(Inventories[inventory].items), json.encode(Inventories[inventory].items) })
+end)
+```
+
 And then add this export at the end of `server/main.lua`:
 
 ```lua
@@ -183,5 +224,24 @@ exports('GetInventoryData', function(type, id)
 	end
 end)
 ```
+
+Copy, and paste the code below at the end of `server/functions.lua1` ONLY FOR qb-inventory (version 2.0.0)
+```lua
+exports('GetInventory', function (id)
+    return Inventories[id]
+end)
+
+exports('SetInventoryItems', function (id, items)
+    if not Inventories[id] then return end
+    Inventories[id].items = items
+
+    -- for slot, item in pairs(items) do item.description = nil end
+    items = json.encode(items)
+    MySQL.prepare('INSERT INTO inventories (identifier, items) VALUES (?, ?) ON DUPLICATE KEY UPDATE items = ?', { id, items, items })
+
+    return Inventories[id].items
+end)
+```
+
 
 - done
